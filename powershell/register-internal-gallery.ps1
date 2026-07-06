@@ -20,6 +20,9 @@
 #   pwsh powershell/register-internal-gallery.ps1              # prompts for a token if none is found
 #   pwsh powershell/register-internal-gallery.ps1 -Token ghp_... # non-interactive
 #
+# Full documentation (parameters, exit codes, Windows/OneDrive): powershell/register-internal-gallery.md
+#   https://github.com/workoho/setup/blob/main/powershell/register-internal-gallery.md
+#
 # The read token is resolved in this order (first hit wins):
 #   1. -Token
 #   2. $env:WORKOHO_PACKAGES_READ_TOKEN   (host env var / Codespaces secret; wired in devcontainer.json)
