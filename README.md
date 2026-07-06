@@ -24,8 +24,9 @@ Registers the Workoho internal PowerShell gallery (a private GitHub Packages NuG
 user and stores a `read:packages` credential in a SecretManagement vault, so `Find-PSResource` /
 `Install-PSResource` work without passing `-Credential` on every call.
 
-Requires **PowerShell 7.6+** (`pwsh`). Windows PowerShell 5.1 is not supported — the underlying
-PSResourceGet + GitHub Packages stack needs 7.4+.
+Requires **PowerShell 7.6+ / Core** (`pwsh`) — matching the Workoho modules' own manifest requirement.
+Windows PowerShell 5.1 is not supported and the script refuses to run there (exits with install guidance
+rather than half-registering the feed), so run it from a `pwsh` session, not `powershell.exe`.
 
 **Interactive — prompts for a token:**
 
