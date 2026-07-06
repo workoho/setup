@@ -1,76 +1,141 @@
 #!/usr/bin/env pwsh
 #Requires -Version 7.6
 
-# Registers the Workoho internal PowerShell gallery (the GitHub Packages NuGet feed) for the current
-# user and stores a read credential in a SecretManagement vault, so Find-PSResource / Install-PSResource
-# work without passing -Credential on every call.
-#
-# This is the central copy in the public workoho/setup repo - the single source of truth referenced by
-# every Workoho module repo and by the one-liners below. It is self-contained and has no dependency on
-# any particular repository's contents.
-#
-# Run it from any machine, no clone needed. Download, compile to a scriptblock, and invoke - we avoid
-# `iwr | iex` because Invoke-Expression is a common AMSI/antivirus trigger. Without a token it prompts:
-#   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))
-#
-# To pass a token non-interactively, append -Token (the scriptblock form forwards parameters):
-#   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1))) -Token ghp_...
-#
-# Or from a local checkout of workoho/setup:
-#   pwsh powershell/register-internal-gallery.ps1              # prompts for a token if none is found
-#   pwsh powershell/register-internal-gallery.ps1 -Token ghp_... # non-interactive
-#
-# Full documentation (parameters, exit codes, Windows/OneDrive): powershell/register-internal-gallery.md
-#   https://github.com/workoho/setup/blob/main/powershell/register-internal-gallery.md
-#
-# The read token is resolved in this order (first hit wins):
-#   1. -Token
-#   2. $env:WORKOHO_PACKAGES_READ_TOKEN   (host env var / Codespaces secret; wired in devcontainer.json)
-#   3. a secret already stored in the target vault (reuse a previously stored token)
-#   4. an interactive prompt (only on a terminal, or with -Interactive)
-#
-# With no token found it prints guidance and exits 2 (non-fatal - nothing was registered), so an
-# unattended caller (a devcontainer post-create step, CI) can call it unconditionally and surface that
-# as a warning; on an unsupported runtime (older than PowerShell 7.6 / non-Core) it exits 3; it exits 4
-# when it would have to install the SecretManagement modules but needs a scope decision first (see
-# -Scope below); any other non-zero exit is a real failure. With -Quiet it stays silent and only signals
-# via the exit code, letting the caller own the messaging. It installs nothing in the no-token or
-# wrong-runtime case. The token must be a classic PAT with read:packages; the GitHub NuGet registry does
-# not accept fine-grained tokens.
-#
-# -Scope (CurrentUser default / AllUsers) controls where the SecretManagement vault modules install. On
-# Windows with OneDrive "Known Folder Move" enabled, the CurrentUser module folder (Documents) is
-# redirected into OneDrive, so CurrentUser installs get uploaded and synced. When that is detected and no
-# explicit -Scope was given, the script stops (exit 4) and asks you to choose: re-run from an elevated
-# session with -Scope AllUsers (installs machine-wide under %ProgramFiles%, outside OneDrive), or pass
-# -Scope CurrentUser to accept the OneDrive location. This only ever gates the module install; when the
-# modules are already present nothing is installed and the check is skipped. The vault data and the
-# repository registration live under LOCALAPPDATA and are never affected by OneDrive.
+<#
+.SYNOPSIS
+    Registers the Workoho internal PowerShell gallery (a private GitHub Packages NuGet feed) and stores a
+    read:packages credential in a SecretManagement vault.
+
+.DESCRIPTION
+    Registers the Workoho internal PowerShell gallery for the current user and stores a read credential in
+    a SecretManagement vault, so Find-PSResource / Install-PSResource work without passing -Credential on
+    every call.
+
+    This is the central copy in the public workoho/setup repo - the single source of truth referenced by
+    every Workoho module repo and by the one-liners in the examples below. It is self-contained and has no
+    dependency on any particular repository's contents.
+
+    The read token is resolved in this order, first hit wins:
+      1. -Token
+      2. $env:WORKOHO_PACKAGES_READ_TOKEN   (host env var / Codespaces secret; wired in devcontainer.json)
+      3. a credential already stored in the target vault (reuse a previous run's token)
+      4. an interactive prompt (only on a real terminal, or with -Interactive)
+
+    The token must be a classic PAT with read:packages; the GitHub NuGet registry does not accept
+    fine-grained tokens.
+
+    On Windows with OneDrive "Known Folder Move" enabled, the per-user module folder (Documents) is
+    redirected into OneDrive, so a CurrentUser module install gets uploaded and synced. The script only
+    installs modules for its own vault dependencies, and refuses to do so silently there: it stops (exit
+    4) and asks you to choose -Scope AllUsers (elevated) or an explicit -Scope CurrentUser. This only ever
+    gates the module install; the repository registration and the SecretStore vault live under
+    %LOCALAPPDATA% and are never affected by OneDrive.
+
+.PARAMETER Token
+    Classic read:packages PAT. Defaults to $env:WORKOHO_PACKAGES_READ_TOKEN. If omitted it is resolved
+    from the vault or an interactive prompt (see the resolution order above).
+
+.PARAMETER Username
+    GitHub username stored alongside the token in the PSCredential. Defaults to $env:WORKOHO_PACKAGES_USER,
+    then to 'workoho'.
+
+.PARAMETER RepositoryName
+    Name the feed is registered under. Defaults to 'WorkohoInternalPSGallery'.
+
+.PARAMETER Uri
+    The GitHub Packages NuGet feed. Defaults to 'https://nuget.pkg.github.com/workoho/index.json'.
+
+.PARAMETER Priority
+    PSResourceGet repository priority; a lower number resolves first. Defaults to 20.
+
+.PARAMETER VaultName
+    SecretManagement vault that holds the credential. Defaults to 'WorkohoVault'.
+
+.PARAMETER SecretName
+    Secret name inside the vault. Defaults to 'WorkohoPackagesRead'.
+
+.PARAMETER Scope
+    Where the SecretManagement vault modules install: 'CurrentUser' (default) or 'AllUsers'. AllUsers
+    writes to %ProgramFiles% and needs an elevated session on Windows. See the OneDrive note above.
+
+.PARAMETER Interactive
+    Force the token prompt even when stdin looks non-interactive (redirected, CI).
+
+.PARAMETER Quiet
+    Suppress all output; signal only via the exit code, letting the caller own the messaging.
+
+.EXAMPLE
+    & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))
+
+    Run from any machine, no clone needed; prompts for a token. The download is compiled into a
+    scriptblock and invoked rather than piped to iex, because Invoke-Expression is a common AMSI/antivirus
+    trigger and the scriptblock form also forwards parameters.
+
+.EXAMPLE
+    & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1))) -Token ghp_xxx
+
+    Same one-liner, non-interactive: -Token is forwarded to the scriptblock.
+
+.EXAMPLE
+    pwsh powershell/register-internal-gallery.ps1 -Scope AllUsers
+
+    From a local checkout, installing the vault modules machine-wide (needs an elevated session on
+    Windows) - recommended when OneDrive redirects your per-user module folder.
+
+.NOTES
+    Requires PowerShell 7.6+ / Core (matches the Workoho module manifests). #Requires enforces that when
+    the file is run directly; the script also checks at runtime because the one-liner path
+    ([scriptblock]::Create / Invoke-Expression) does not honor #Requires.
+
+    Exit codes:
+      0      success - feed registered or updated
+      2      no read token found; nothing registered (non-fatal - a caller may treat it as a warning)
+      3      unsupported runtime (older than PowerShell 7.6, or non-Core)
+      4      needs a scope decision before installing the vault modules (OneDrive-redirected CurrentUser,
+             or AllUsers without elevation)
+      other  a real failure
+
+.LINK
+    https://github.com/workoho/setup/blob/main/powershell/register-internal-gallery.md
+
+.LINK
+    https://github.com/workoho/setup
+#>
 
 [CmdletBinding()]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingConvertToSecureStringWithPlainText', '',
     Justification = 'The token arrives as a plain string from an env var/param and must become a SecureString for the PSCredential.')]
 param(
+    # Classic read:packages PAT; falls back to the env var, the vault, then a prompt (see .DESCRIPTION).
     [string] $Token = $env:WORKOHO_PACKAGES_READ_TOKEN,
 
+    # GitHub username stored with the token; defaults below to 'workoho' when unset.
     [string] $Username = $env:WORKOHO_PACKAGES_USER,
 
+    # Name the feed is registered under.
     [string] $RepositoryName = 'WorkohoInternalPSGallery',
 
+    # The GitHub Packages NuGet feed URL.
     [string] $Uri = 'https://nuget.pkg.github.com/workoho/index.json',
 
+    # Repository priority; lower resolves first.
     [int] $Priority = 20,
 
+    # SecretManagement vault that holds the credential.
     [string] $VaultName = 'WorkohoVault',
 
+    # Secret name inside the vault.
     [string] $SecretName = 'WorkohoPackagesRead',
 
+    # Where the vault modules install; AllUsers needs elevation. See the OneDrive note in .DESCRIPTION.
     [ValidateSet('CurrentUser', 'AllUsers')]
     [string] $Scope = 'CurrentUser',
 
+    # Force the token prompt even when stdin looks non-interactive.
     [switch] $Interactive,
 
+    # Suppress all output; signal only via the exit code.
     [switch] $Quiet
 )
 
