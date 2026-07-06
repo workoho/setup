@@ -28,8 +28,9 @@
 #
 # With no token found it prints guidance and exits 2 (non-fatal — nothing was registered), so an
 # unattended caller (a devcontainer post-create step, CI) can call it unconditionally and surface that
-# as a warning; any other non-zero exit is a real failure. With -Quiet it stays silent and only signals
-# via the exit code, letting the caller own the messaging. It installs nothing in the no-token case. The
+# as a warning; on an unsupported runtime (older than PowerShell 7.6 / non-Core) it exits 3; any other
+# non-zero exit is a real failure. With -Quiet it stays silent and only signals via the exit code,
+# letting the caller own the messaging. It installs nothing in the no-token or wrong-runtime case. The
 # token must be a classic PAT with read:packages; the GitHub NuGet registry does not accept
 # fine-grained tokens.
 
@@ -56,6 +57,24 @@ param(
 
     [switch] $Quiet
 )
+
+# --- 0. Enforce the PowerShell 7.6+ (Core) runtime before anything else ----------------------------
+# The Workoho modules and the PSResourceGet stack this uses are PowerShell 7.6+ / Core only (matches the
+# module manifest's PowerShellVersion + CompatiblePSEditions). The #Requires above enforces that only
+# when this runs as a .ps1 file — the recommended one-liner compiles the download into a scriptblock
+# (& ([scriptblock]::Create(...))), and neither a scriptblock nor Invoke-Expression honors #Requires. So
+# on Windows PowerShell 5.1 the guard would be skipped and the script would later die with a confusing
+# "module not found" for PSResourceGet. Check explicitly and stop early (exit 3) with actionable
+# guidance, before importing anything, so a wrong runtime never half-registers the feed.
+$psv = $PSVersionTable.PSVersion
+if ($PSVersionTable.PSEdition -ne 'Core' -or $psv.Major -lt 7 -or ($psv.Major -eq 7 -and $psv.Minor -lt 6)) {
+    if (-not $Quiet) {
+        $running = if ($PSVersionTable.PSEdition -eq 'Desktop') { "Windows PowerShell $psv" } else { "PowerShell $psv ($($PSVersionTable.PSEdition))" }
+        Write-Warning "The Workoho internal PowerShell gallery requires PowerShell 7.6 or newer (Core edition); you are running $running."
+        Write-Warning 'Install PowerShell 7 from https://aka.ms/powershell, then re-run this from a ''pwsh'' session.'
+    }
+    exit 3
+}
 
 $ErrorActionPreference = 'Stop'
 
