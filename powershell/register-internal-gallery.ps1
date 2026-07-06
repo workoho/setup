@@ -5,20 +5,20 @@
 # user and stores a read credential in a SecretManagement vault, so Find-PSResource / Install-PSResource
 # work without passing -Credential on every call.
 #
-# This is the central copy in the public workoho/setup repo — the single source of truth referenced by
+# This is the central copy in the public workoho/setup repo - the single source of truth referenced by
 # every Workoho module repo and by the one-liners below. It is self-contained and has no dependency on
 # any particular repository's contents.
 #
-# Run it from any machine, no clone needed. Download, compile to a scriptblock, and invoke — we avoid
+# Run it from any machine, no clone needed. Download, compile to a scriptblock, and invoke - we avoid
 # `iwr | iex` because Invoke-Expression is a common AMSI/antivirus trigger. Without a token it prompts:
 #   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))
 #
 # To pass a token non-interactively, append -Token (the scriptblock form forwards parameters):
-#   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1))) -Token ghp_…
+#   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1))) -Token ghp_...
 #
 # Or from a local checkout of workoho/setup:
 #   pwsh powershell/register-internal-gallery.ps1              # prompts for a token if none is found
-#   pwsh powershell/register-internal-gallery.ps1 -Token ghp_… # non-interactive
+#   pwsh powershell/register-internal-gallery.ps1 -Token ghp_... # non-interactive
 #
 # The read token is resolved in this order (first hit wins):
 #   1. -Token
@@ -26,7 +26,7 @@
 #   3. a secret already stored in the target vault (reuse a previously stored token)
 #   4. an interactive prompt (only on a terminal, or with -Interactive)
 #
-# With no token found it prints guidance and exits 2 (non-fatal — nothing was registered), so an
+# With no token found it prints guidance and exits 2 (non-fatal - nothing was registered), so an
 # unattended caller (a devcontainer post-create step, CI) can call it unconditionally and surface that
 # as a warning; on an unsupported runtime (older than PowerShell 7.6 / non-Core) it exits 3; any other
 # non-zero exit is a real failure. With -Quiet it stays silent and only signals via the exit code,
@@ -61,7 +61,7 @@ param(
 # --- 0. Enforce the PowerShell 7.6+ (Core) runtime before anything else ----------------------------
 # The Workoho modules and the PSResourceGet stack this uses are PowerShell 7.6+ / Core only (matches the
 # module manifest's PowerShellVersion + CompatiblePSEditions). The #Requires above enforces that only
-# when this runs as a .ps1 file — the recommended one-liner compiles the download into a scriptblock
+# when this runs as a .ps1 file - the recommended one-liner compiles the download into a scriptblock
 # (& ([scriptblock]::Create(...))), and neither a scriptblock nor Invoke-Expression honors #Requires. So
 # on Windows PowerShell 5.1 the guard would be skipped and the script would later die with a confusing
 # "module not found" for PSResourceGet. Check explicitly and stop early (exit 3) with actionable
@@ -83,7 +83,7 @@ $ErrorActionPreference = 'Stop'
 Import-Module Microsoft.PowerShell.PSResourceGet -ErrorAction Stop
 
 function Write-Status {
-    param([string] $Message, [string] $Symbol = '•')
+    param([string] $Message, [string] $Symbol = '[*]')
     if (-not $Quiet) { Write-Output "$Symbol $Message" }
 }
 
@@ -105,7 +105,7 @@ if ($Token) {
     $tokenSource = 'parameter/environment'
 }
 
-# Reuse a previously stored token, but only if the vault modules are already present — never install
+# Reuse a previously stored token, but only if the vault modules are already present - never install
 # them just to look. A fresh machine has no vault, so this is skipped there.
 if (-not $secureToken -and (Get-Module -ListAvailable -Name $secretManagement)) {
     Import-Module $secretManagement -ErrorAction SilentlyContinue
@@ -129,12 +129,12 @@ if (-not $secureToken -and $promptAllowed) {
 }
 
 if (-not $secureToken) {
-    Write-Status 'No read token found — feed not registered.' '⚠'
+    Write-Status 'No read token found - feed not registered.' '[!]'
     if (-not $Quiet) {
         Write-Output ''
         Write-Output 'To enable read access, provide a classic PAT with read:packages by either:'
-        Write-Output '  • setting WORKOHO_PACKAGES_READ_TOKEN on your host (or as a Codespaces secret), or'
-        Write-Output '  • re-running the one-liner (it will prompt):'
+        Write-Output '  - setting WORKOHO_PACKAGES_READ_TOKEN on your host (or as a Codespaces secret), or'
+        Write-Output '  - re-running the one-liner (it will prompt):'
         Write-Output '      & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))'
         Write-Output 'See https://github.com/workoho/setup.'
     }
@@ -144,7 +144,7 @@ if (-not $secureToken) {
 # --- 2. We have a token: ensure the vault modules and a usable vault exist ------------------------
 foreach ($module in $secretManagement, $secretStore) {
     if (-not (Get-Module -ListAvailable -Name $module)) {
-        Write-Status "Installing $module…"
+        Write-Status "Installing $module..."
         Install-PSResource -Name $module -Repository PSGallery -TrustRepository -Quiet
     }
     Import-Module $module -ErrorAction Stop
@@ -171,10 +171,10 @@ $credentialInfo = [Microsoft.PowerShell.PSResourceGet.UtilClasses.PSCredentialIn
 
 if (Get-PSResourceRepository -Name $RepositoryName -ErrorAction SilentlyContinue) {
     Set-PSResourceRepository -Name $RepositoryName -Uri $Uri -Trusted -Priority $Priority -CredentialInfo $credentialInfo
-    Write-Status "Updated repository '$RepositoryName'." '✓'
+    Write-Status "Updated repository '$RepositoryName'." '[+]'
 } else {
     Register-PSResourceRepository -Name $RepositoryName -Uri $Uri -Trusted -Priority $Priority -CredentialInfo $credentialInfo
-    Write-Status "Registered repository '$RepositoryName'." '✓'
+    Write-Status "Registered repository '$RepositoryName'." '[+]'
 }
 
 if (-not $Quiet) {
