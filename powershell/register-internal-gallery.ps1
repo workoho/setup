@@ -9,10 +9,11 @@
 # every Workoho module repo and by the one-liners below. It is self-contained and has no dependency on
 # any particular repository's contents.
 #
-# Run it from any machine, no clone needed (prompts for a token if none is found):
-#   iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1 | iex
+# Run it from any machine, no clone needed. Download, compile to a scriptblock, and invoke — we avoid
+# `iwr | iex` because Invoke-Expression is a common AMSI/antivirus trigger. Without a token it prompts:
+#   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))
 #
-# To pass a token non-interactively, use the scriptblock form (iex cannot forward parameters):
+# To pass a token non-interactively, append -Token (the scriptblock form forwards parameters):
 #   & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1))) -Token ghp_…
 #
 # Or from a local checkout of workoho/setup:
@@ -115,7 +116,7 @@ if (-not $secureToken) {
         Write-Output 'To enable read access, provide a classic PAT with read:packages by either:'
         Write-Output '  • setting WORKOHO_PACKAGES_READ_TOKEN on your host (or as a Codespaces secret), or'
         Write-Output '  • re-running the one-liner (it will prompt):'
-        Write-Output '      iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1 | iex'
+        Write-Output '      & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))'
         Write-Output 'See https://github.com/workoho/setup.'
     }
     exit 2

@@ -7,10 +7,14 @@ PowerShell gallery). A fix here reaches every repo that references it.
 
 Scripts are grouped by shell:
 
-| Folder        | For        | Run with                    |
-| ------------- | ---------- | --------------------------- |
-| `powershell/` | PowerShell | `iwr … \| iex` (PowerShell) |
-| `bash/`       | POSIX sh   | `curl … \| sh` (Bash)       |
+| Folder        | For        | Run with                                       |
+| ------------- | ---------- | ---------------------------------------------- |
+| `powershell/` | PowerShell | `& ([scriptblock]::Create((iwr …)))` (pwsh)    |
+| `bash/`       | POSIX sh   | `curl … \| sh` (Bash)                          |
+
+> PowerShell scripts are invoked via `[scriptblock]::Create` rather than `iwr … | iex` on purpose:
+> `Invoke-Expression` is a common AMSI/antivirus trigger, and the scriptblock form also lets you pass
+> parameters.
 
 ## Scripts
 
@@ -26,11 +30,10 @@ PSResourceGet + GitHub Packages stack needs 7.4+.
 **Interactive — prompts for a token:**
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1 | iex
+& ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1)))
 ```
 
-**Non-interactive — pass a token.** `iex` cannot forward parameters, so compile the download into a
-scriptblock and invoke it:
+**Non-interactive — pass a token.** Same form, with `-Token` appended:
 
 ```powershell
 & ([scriptblock]::Create((iwr -useb https://raw.githubusercontent.com/workoho/setup/main/powershell/register-internal-gallery.ps1))) -Token ghp_xxx
