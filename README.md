@@ -44,8 +44,23 @@ The token is a **classic** PAT with the `read:packages` scope (fine-grained toke
 the GitHub NuGet registry). The script also picks up `WORKOHO_PACKAGES_READ_TOKEN` from the environment
 and reuses a credential already stored in the vault, so on a configured machine it needs no input at all.
 
-Other parameters (`-RepositoryName`, `-Uri`, `-Priority`, `-VaultName`, `-SecretName`, `-Quiet`,
-`-Interactive`) are documented in the header of
+#### Windows + OneDrive
+
+If OneDrive "Known Folder Move" is on, your `Documents` folder — and with it the per-user PowerShell
+module path — is redirected into OneDrive, so a `CurrentUser` module install gets uploaded and synced
+(slow and error-prone). When the script would have to install its vault modules and detects this, it
+**stops** and asks you to choose rather than silently syncing modules to the cloud:
+
+- **Machine-wide (recommended):** from a PowerShell started with **Run as administrator**, re-run with
+  `-Scope AllUsers` — modules land under `%ProgramFiles%`, outside OneDrive.
+- **Keep it in OneDrive anyway:** append `-Scope CurrentUser` to confirm the redirected location.
+
+This only ever affects the *module install*; the stored credential and the repository registration live
+under `%LOCALAPPDATA%` and are never touched by OneDrive. If the vault modules are already installed,
+nothing is written and the check is skipped.
+
+Other parameters (`-Scope`, `-RepositoryName`, `-Uri`, `-Priority`, `-VaultName`, `-SecretName`,
+`-Quiet`, `-Interactive`) are documented in the header of
 [the script](powershell/register-internal-gallery.ps1).
 
 ## Which ref to reference
