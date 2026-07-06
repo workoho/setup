@@ -1,0 +1,18 @@
+Proprietary and Confidential
+
+SPDX-License-Identifier: LicenseRef-Workoho-Proprietary
+
+Copyright (c) 2026 Workoho GmbH. All rights reserved.
+
+This repository is published publicly only so that its bootstrap scripts can be
+fetched and run directly (for example via Invoke-WebRequest or curl) on machines
+authorized by Workoho GmbH. Public visibility does not place the contents in the
+public domain and grants no license beyond that use.
+
+No rights are granted to copy, modify, merge, publish, redistribute, sublicense,
+or sell these scripts, or to create derivative works, except as expressly
+authorized in writing by Workoho GmbH.
+
+The scripts are provided "as is", without warranties of any kind, whether express
+or implied, including but not limited to merchantability, fitness for a particular
+purpose, and non-infringement. Running them is at your own risk.
