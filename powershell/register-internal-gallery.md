@@ -69,6 +69,31 @@ script's closing hint reminds you to install them with `-Scope AllUsers` from an
 Install-PSResource -Name Workoho.Entra.GuestGovernance -Repository WorkohoInternalPSGallery -Scope AllUsers
 ```
 
+## Vault password
+
+The credential lives in a [SecretStore](https://learn.microsoft.com/powershell/utility-modules/secretmanagement/how-to/manage-secretstore)
+vault. By default SecretStore requires a **vault password**: each new PowerShell session prompts once to
+unlock it, and it re-locks after the configured `PasswordTimeout` (default 900 s). So on a normal
+workstation, `Install-PSResource` from this feed can fail with *"A valid password is required to access the
+Microsoft.PowerShell.SecretStore vault"* until you unlock it.
+
+Two ways to avoid the prompts:
+
+- **Unlock per session:** run `Unlock-SecretStore` once per `pwsh` session (optionally
+  `Set-SecretStoreConfiguration -PasswordTimeout -1` so a single unlock lasts the whole session).
+- **Drop the password entirely** with `-NoVaultPassword` (or `Set-SecretStoreConfiguration -Authentication
+  None -Interaction None`). This is the right choice for a read-only gallery token that is not sensitive —
+  **but** SecretStore is a *single per-user store* and its authentication setting is global to that store,
+  not per vault name. Turning the password off removes it for **every** secret in your SecretStore. Only do
+  this if the store holds nothing but this gallery credential — which is why the vault is named
+  `WorkohoInternalGalleryVault` to signal its single purpose. Keep other, more sensitive secrets in a
+  different vault (for example the macOS Keychain via `SecretManagement.KeyChain`) if you need them.
+
+Inside a dev container / Codespace `-NoVaultPassword` is applied automatically: the store is isolated and
+starts empty, so it is configured password-free (via `Reset-SecretStore`) and nothing ever prompts. On a
+workstation the script never resets your store; if it already has a password it prompts once for it to
+authorize the change, and existing secrets are preserved.
+
 ## Parameters
 
 | Parameter | Default | Purpose |
@@ -79,8 +104,9 @@ Install-PSResource -Name Workoho.Entra.GuestGovernance -Repository WorkohoIntern
 | `-RepositoryName` | `WorkohoInternalPSGallery` | Name the feed is registered under. |
 | `-Uri` | `https://nuget.pkg.github.com/workoho/index.json` | The GitHub Packages NuGet feed. |
 | `-Priority` | `20` | Repository priority (lower resolves first). |
-| `-VaultName` | `WorkohoVault` | SecretManagement vault holding the credential. |
+| `-VaultName` | `WorkohoInternalGalleryVault` | SecretManagement vault holding the credential. |
 | `-SecretName` | `WorkohoPackagesRead` | Secret name inside the vault. |
+| `-NoVaultPassword` | off (on in container) | Configure SecretStore to need no vault password. See Vault password below. |
 | `-Interactive` | off | Force the token prompt even when stdin looks non-interactive. |
 | `-Quiet` | off | Suppress all output; signal only via the exit code (the caller owns messaging). |
 

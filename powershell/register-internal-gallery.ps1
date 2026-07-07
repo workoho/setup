@@ -49,7 +49,8 @@
     PSResourceGet repository priority; a lower number resolves first. Defaults to 20.
 
 .PARAMETER VaultName
-    SecretManagement vault that holds the credential. Defaults to 'WorkohoVault'.
+    SecretManagement vault that holds the credential. Defaults to 'WorkohoInternalGalleryVault' - the name
+    signals that this store is meant to hold only the gallery read credential (see -NoVaultPassword).
 
 .PARAMETER SecretName
     Secret name inside the vault. Defaults to 'WorkohoPackagesRead'.
@@ -57,6 +58,16 @@
 .PARAMETER Scope
     Where the SecretManagement vault modules install: 'CurrentUser' (default) or 'AllUsers'. AllUsers
     writes to %ProgramFiles% and needs an elevated session on Windows. See the OneDrive note above.
+
+.PARAMETER NoVaultPassword
+    Configure the local SecretStore so it needs no vault password (Authentication = None), so read
+    commands never stop to unlock it. SecretStore is a single per-user store and this setting is global to
+    it, so it removes the password protection for EVERY secret in that store, not only the gallery
+    credential - use it only when the store holds nothing else. On a fresh store the password-free
+    configuration is applied directly; on an existing password-protected store SecretStore prompts once
+    for the current password to authorize the change (existing secrets are preserved - the script never
+    resets a workstation store). Inside a dev container / Codespace this is applied automatically because
+    the store is isolated and starts empty.
 
 .PARAMETER Interactive
     Force the token prompt even when stdin looks non-interactive (redirected, CI).
@@ -122,8 +133,9 @@ param(
     # Repository priority; lower resolves first.
     [int] $Priority = 20,
 
-    # SecretManagement vault that holds the credential.
-    [string] $VaultName = 'WorkohoVault',
+    # SecretManagement vault that holds the credential. The name signals its single purpose - this store
+    # is meant to hold nothing but the gallery read credential (see -NoVaultPassword).
+    [string] $VaultName = 'WorkohoInternalGalleryVault',
 
     # Secret name inside the vault.
     [string] $SecretName = 'WorkohoPackagesRead',
@@ -131,6 +143,13 @@ param(
     # Where the vault modules install; AllUsers needs elevation. See the OneDrive note in .DESCRIPTION.
     [ValidateSet('CurrentUser', 'AllUsers')]
     [string] $Scope = 'CurrentUser',
+
+    # Configure the local SecretStore to require no vault password (Authentication = None), so read
+    # commands never stop to unlock it. IMPORTANT: SecretStore is a single per-user store and this setting
+    # is global to it - it removes the password for EVERY secret in your SecretStore, not just this one.
+    # Only use it when this store holds nothing but the gallery credential. Applied automatically inside an
+    # isolated dev container / Codespace.
+    [switch] $NoVaultPassword,
 
     # Force the token prompt even when stdin looks non-interactive.
     [switch] $Interactive,
@@ -284,14 +303,43 @@ foreach ($module in $secretManagement, $secretStore) {
     Import-Module $module -ErrorAction Stop
 }
 
-if (-not (Get-SecretVault -Name $VaultName -ErrorAction SilentlyContinue)) {
-    # In an isolated dev container/Codespace, initialize SecretStore for unattended use (no vault
-    # password) so post-create and later commands never block on a prompt. Reset-SecretStore is the
-    # only non-interactive way to set this on a brand-new store; it is safe here because the container
-    # store starts empty. On a normal workstation we leave the developer's SecretStore untouched.
-    if ($inContainer) {
-        Reset-SecretStore -Scope CurrentUser -Authentication None -Interaction None -Force -Confirm:$false -WarningAction SilentlyContinue
+# Optionally make the local SecretStore password-free. SecretStore always operates as a single per-user
+# store and its Authentication setting is global to that store, not per vault name - so this removes the
+# vault password for EVERY secret in the caller's SecretStore. It is therefore opt-in (-NoVaultPassword),
+# which asserts that this store holds nothing but the gallery credential, and applied automatically inside
+# an isolated dev container/Codespace so post-create and later commands never block on an unlock prompt.
+if ($inContainer -or $NoVaultPassword) {
+    $currentAuth = try { (Get-SecretStoreConfiguration -ErrorAction Stop).Authentication } catch { $null }
+
+    if ($currentAuth -eq 'None') {
+        Write-Status 'SecretStore already needs no vault password.'
     }
+    elseif ($inContainer) {
+        # A container/Codespace store starts empty, so Reset-SecretStore is safe here and is the only way
+        # to configure a brand-new store non-interactively. It erases any existing secrets, so it is used
+        # ONLY on this isolated, empty store - never on a workstation.
+        Reset-SecretStore -Scope CurrentUser -Authentication None -Interaction None -Force -Confirm:$false -WarningAction SilentlyContinue
+        Write-Status 'Configured SecretStore for password-free access (container).'
+    }
+    else {
+        # On a real workstation never Reset (it would wipe the developer's secrets). Change the live
+        # configuration instead; on an existing password-protected store SecretStore prompts once for the
+        # current password to authorize the change. Existing secrets are preserved.
+        try {
+            Set-SecretStoreConfiguration -Authentication None -Interaction None -Confirm:$false -WarningAction SilentlyContinue | Out-Null
+            Write-Status 'Configured SecretStore to need no vault password (applies to your whole SecretStore).'
+        }
+        catch {
+            Write-Status "Could not disable the SecretStore password automatically: $($_.Exception.Message)" '[!]'
+            if (-not $Quiet) {
+                Write-Output '  Run this once, entering your current vault password when prompted, then re-run:'
+                Write-Output '      Set-SecretStoreConfiguration -Authentication None -Interaction None'
+            }
+        }
+    }
+}
+
+if (-not (Get-SecretVault -Name $VaultName -ErrorAction SilentlyContinue)) {
     Register-SecretVault -Name $VaultName -ModuleName $secretStore
     Write-Status "Registered SecretManagement vault '$VaultName'."
 }
@@ -315,6 +363,20 @@ if (-not $Quiet) {
     Write-Output ''
     # GitHub Packages has no wildcard search; query by exact name. -Prerelease shows preview builds.
     Write-Output "Read access is ready. Try:  Find-PSResource -Name Workoho.Entra.GuestGovernance -Repository $RepositoryName -Prerelease"
+
+    # If the store still has a vault password, every new session prompts once to unlock it (and re-locks
+    # after PasswordTimeout, default 900 s). Point read-only users at the two ways to stop that.
+    if (-not $inContainer -and -not $NoVaultPassword) {
+        $auth = try { (Get-SecretStoreConfiguration -ErrorAction Stop).Authentication } catch { $null }
+        if ($auth -ne 'None') {
+            Write-Output ''
+            Write-Output '[i] Your SecretStore asks for its vault password once per session (and again after the'
+            Write-Output '    timeout). To stop the prompts for this read-only gallery token, either:'
+            Write-Output '      - re-run with -NoVaultPassword (drops the password for your whole SecretStore - only'
+            Write-Output '        do this if it holds nothing but this credential), or'
+            Write-Output '      - unlock per session with:  Unlock-SecretStore'
+        }
+    }
 
     # Reading is fine from any session, but *installing* modules is where OneDrive redirection bites: a
     # default CurrentUser install would sync the Workoho modules to the cloud. Steer that install to
